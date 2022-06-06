@@ -1,0 +1,90 @@
+{
+  "StartAt": "CreateProcessingJob",
+  "States": {
+    "CreateProcessingJob": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createProcessingJob",
+      "ResultPath": null,
+      "Parameters": {
+        "AppSpecification.$": "$.AppSpecification",
+        "ProcessingResources.$": "$.ProcessingResources",
+        "RoleArn.$": "$.RoleArn",
+        "ProcessingJobName.$": "$.ProcessingJobName"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SageMaker.AmazonSageMakerException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Wait"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 5,
+      "Next": "DescribeProcessingJob"
+    },
+    "DescribeProcessingJob": {
+      "Type": "Task",
+      "Parameters": {
+        "ProcessingJobName.$": "$.ProcessingJobName"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:sagemaker:describeProcessingJob",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SageMaker.AmazonSageMakerException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Choice"
+    },
+    "Choice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Or": [
+            {
+              "Variable": "$.ProcessingJobStatus",
+              "StringEquals": "Completed"
+            },
+            {
+              "Variable": "$.ProcessingJobStatus",
+              "StringEquals": "Failed"
+            },
+            {
+              "Variable": "$.ProcessingJobStatus",
+              "StringEquals": "Stopped"
+            }
+          ],
+          "Next": "Leave"
+        }
+      ],
+      "Default": "Wait"
+    },
+    "Leave": {
+      "Type": "Task",
+      "Resource": "${LeaveFunctionArn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    }
+  }
+}

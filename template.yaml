@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  WaitingStateMachineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+  WaitingStateMachine:
+    Type: 'AWS::Serverless::StateMachine'
+    Properties:
+      DefinitionUri: statemachine/waiting.asl.json
+      DefinitionSubstitutions:
+        LeaveFunctionArn: !GetAtt LeaveFunction.Arn
+      Role: !GetAtt WaitingStateMachineRole.Arn
+  Queue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      FifoQueue: True
+      MessageRetentionPeriod: 345600
+      QueueName: 'SageMakerJobs.fifo'
+      VisibilityTimeout: 30
+  EnterLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+  EnterFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: functions/enter/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref CounterTable
+          STATE_MACHINE_ARN: !Ref WaitingStateMachine
+      Role: !GetAtt EnterLambdaRole.Arn
+  LeaveLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+  LeaveFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: functions/leave/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref CounterTable
+      Role: !GetAtt LeaveLambdaRole.Arn
+
+  SQSLambdaEventSource:
+    Type: 'AWS::Lambda::EventSourceMapping'
+    Properties:
+      BatchSize: 1
+      Enabled: True
+      EventSourceArn: !GetAtt Queue.Arn
+      FunctionName: !Ref EnterFunction
+      FunctionResponseTypes:
+        - 'ReportBatchItemFailures'
+  CounterTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: "InstanceType"
+            AttributeType: "S"
+        KeySchema:
+          - AttributeName: "InstanceType"
+            KeyType: "HASH"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
