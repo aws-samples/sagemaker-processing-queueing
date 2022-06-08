@@ -15,13 +15,36 @@ Resources:
               - 'sts:AssumeRole'
       Path: /
       Policies:
-        - PolicyName: root
+        - PolicyName: LambdaWrite
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: '*'
+                Action: 'lambda:InvokeFunction'
+                Resource: !GetAtt LeaveFunction.Arn
+        - PolicyName: SageMakerReadWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:CreateProcessingJob'
+                  - 'sagemaker:DescribeProcessingJob'
                 Resource: '*'
+        - PolicyName: PassRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'iam:PassRole'
+                Resource: !Join
+                  - ':'
+                  - - 'arn'
+                    - !Ref AWS::Partition
+                    - 'iam'
+                    - ''
+                    - !Ref AWS::AccountId
+                    - 'role/SageMaker*'
   WaitingStateMachine:
     Type: 'AWS::Serverless::StateMachine'
     Properties:
@@ -50,13 +73,40 @@ Resources:
               - 'sts:AssumeRole'
       Path: /
       Policies:
-        - PolicyName: root
+        - PolicyName: CloudWatchWrite
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: '*'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
                 Resource: '*'
+        - PolicyName: DynamoWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'dynamodb:UpdateItem'
+                Resource: !GetAtt CounterTable.Arn
+        - PolicyName: StepFunctionsWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'states:StartExecution'
+                Resource: !Ref WaitingStateMachine
+        - PolicyName: QueueRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sqs:ReceiveMessage'
+                  - 'sqs:DeleteMessage'
+                  - 'sqs:GetQueueAttributes'
+                Resource: !GetAtt Queue.Arn
   EnterFunction:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -84,13 +134,23 @@ Resources:
               - 'sts:AssumeRole'
       Path: /
       Policies:
-        - PolicyName: root
+        - PolicyName: CloudWatchWrite
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: '*'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
                 Resource: '*'
+        - PolicyName: DynamoWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'dynamodb:UpdateItem'
+                Resource: !GetAtt CounterTable.Arn
   LeaveFunction:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -103,7 +163,6 @@ Resources:
         Variables:
           TABLE_NAME: !Ref CounterTable
       Role: !GetAtt LeaveLambdaRole.Arn
-
   SQSLambdaEventSource:
     Type: 'AWS::Lambda::EventSourceMapping'
     Properties:
