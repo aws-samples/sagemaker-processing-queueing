@@ -1,3 +1,7 @@
+# Description
+
+This projects allows an application to send SageMaker Processing requests to a queue and have concurrency control over how many jobs can run using a particular instance type concurrently as to avoid hitting account quota limits.
+
 # Architecture
 
 ![architecture](architecture.drawio.png)
