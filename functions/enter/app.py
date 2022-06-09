@@ -30,11 +30,13 @@ def lambda_handler(event, context) -> Dict:
                 },
                 ConditionExpression='RunningInstancesCount < RunningInstancesLimit'
             )
+            print(update_item_resp)
             start_execution_resp = step_functions.start_execution(
                 stateMachineArn=state_machine_arn,
                 name=f'{uuid.uuid4()}',
                 input=record['body']
             )
+            print(start_execution_resp)
         except ClientError as err:
             if err.response['Error']['Code'] == 'ConditionalCheckFailedException':
                 failed_messages.append(record['messageId'])
