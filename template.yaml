@@ -1,8 +1,28 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Resources:
+  SageMakerProcessingJobRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
   WaitingStateMachineRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: 'The training jobs name are arbitrary when sending jobs to the queue. The user could a suitable prefix.'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -37,14 +57,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 'iam:PassRole'
-                Resource: !Join
-                  - ':'
-                  - - 'arn'
-                    - !Ref AWS::Partition
-                    - 'iam'
-                    - ''
-                    - !Ref AWS::AccountId
-                    - 'role/SageMaker*'
+                Resource: !GetAtt SageMakerProcessingJobRole.Arn
   WaitingStateMachine:
     Type: 'AWS::Serverless::StateMachine'
     Properties:
@@ -59,8 +72,14 @@ Resources:
       MessageRetentionPeriod: 345600
       QueueName: 'SageMakerJobs.fifo'
       VisibilityTimeout: 30
+      KmsMasterKeyId: 'alias/aws/sqs'
   EnterLambdaRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: 'The log groups are created by Lambda'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -109,6 +128,11 @@ Resources:
                 Resource: !GetAtt Queue.Arn
   EnterFunction:
     Type: 'AWS::Serverless::Function'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: 'We do not assume the user has a VPC. The user should add their own VPC if desired.'
     Properties:
       CodeUri: functions/enter/
       Handler: app.lambda_handler
@@ -120,8 +144,14 @@ Resources:
           TABLE_NAME: !Ref CounterTable
           STATE_MACHINE_ARN: !Ref WaitingStateMachine
       Role: !GetAtt EnterLambdaRole.Arn
+      ReservedConcurrentExecutions: 10
   LeaveLambdaRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: 'The log groups are created by Lambda'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -153,6 +183,11 @@ Resources:
                 Resource: !GetAtt CounterTable.Arn
   LeaveFunction:
     Type: 'AWS::Serverless::Function'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: 'We do not assume the user has a VPC. The user should add their own VPC if desired.'
     Properties:
       CodeUri: functions/leave/
       Handler: app.lambda_handler
@@ -163,6 +198,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref CounterTable
       Role: !GetAtt LeaveLambdaRole.Arn
+      ReservedConcurrentExecutions: 10
   SQSLambdaEventSource:
     Type: 'AWS::Lambda::EventSourceMapping'
     Properties:
@@ -181,6 +217,17 @@ Resources:
         KeySchema:
           - AttributeName: "InstanceType"
             KeyType: "HASH"
-        ProvisionedThroughput:
-          ReadCapacityUnits: 1
-          WriteCapacityUnits: 1
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: True
+        BillingMode: 'PAY_PER_REQUEST'
+        SSESpecification:
+          SSEEnabled: True
+Outputs:
+  CounterTableName:
+    Value: !Ref CounterTable
+    Export:
+      Name: !Sub 'CounterTableName-${AWS::StackName}'
+  SageMakerProcessingJobRoleArn:
+    Value: !GetAtt SageMakerProcessingJobRole.Arn
+    Export:
+      Name: !Sub 'SageMakerProcessingJobArn-${AWS::StackName}'
